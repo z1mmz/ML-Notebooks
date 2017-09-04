@@ -1,0 +1,1325 @@
+# myTeam.py
+# ---------
+# Licensing Information:  You are free to use or extend these projects for
+# educational purposes provided that (1) you do not distribute or publish
+# solutions, (2) you retain this notice, and (3) you provide clear
+# attribution to UC Berkeley, including a link to http://ai.berkeley.edu.
+# 
+# Attribution Information: The Pacman AI projects were developed at UC Berkeley.
+# The core projects and autograders were primarily created by John DeNero
+# (denero@cs.berkeley.edu) and Dan Klein (klein@cs.berkeley.edu).
+# Student side autograding was added by Brad Miller, Nick Hay, and
+# Pieter Abbeel (pabbeel@cs.berkeley.edu).
+
+
+from captureAgents import CaptureAgent
+import random, time, util
+from game import Directions
+import game
+from game import Actions
+import random
+
+
+#################
+# Team creation #
+#################
+
+def createTeam(firstIndex, secondIndex, isRed,
+               first='Attacker', second='Defender'):
+    """
+  This function should return a list of two agents that will form the
+  team, initialized using firstIndex and secondIndex as their agent
+  index numbers.  isRed is True if the red team is being created, and
+  will be False if the blue team is being created.
+  As a potentially helpful development aid, this function can take
+  additional string-valued keyword arguments ("first" and "second" are
+  such arguments in the case of this function), which will come from
+  the --redOpts and --blueOpts command-line arguments to capture.py.
+  For the nightly contest, however, your team will be created without
+  any extra arguments, so you should make sure that the default
+  behavior is what you want for the nightly contest.
+  """
+
+    # The following line is an example only feel free to change it.
+    return [eval(first)(firstIndex), eval(second)(secondIndex)]
+
+
+##########
+# Agents #
+##########
+
+class qAgent(CaptureAgent):
+    """
+  A Dummy agent to serve as an example of the necessary agent structure.
+  You should look at baselineTeam.py for more details about how to
+  create an agent as this is the bare minimum.
+  """
+
+    def __init__(self, index):
+        CaptureAgent.__init__(self, index)
+
+    def registerInitialState(self, gameState):
+        """
+    This method handles the initial setup of the
+    agent to populate useful fields (such as what team
+    we're on).
+    A distanceCalculator instance caches the maze distances
+    between each pair of positions, so your agents can use:
+    self.distancer.getDistance(p1, p2)
+    IMPORTANT: This method may run for at most 15 seconds.
+    """
+
+        '''
+    Make sure you do not delete the following line. If you would like to
+    use Manhattan distances instead of maze distances in order to save
+    on initialization time, please take a look at
+    CaptureAgent.registerInitialState in captureAgents.py.
+    '''
+        CaptureAgent.registerInitialState(self, gameState)
+
+        '''
+    Your initialization code goes here, if you need any.
+    '''
+        self.start = gameState.getAgentPosition(self.index)
+        self.depth = 1
+
+        self.food_eaten = 0
+
+        self.last_known_ghosts = []
+        self.top = False
+
+        # Defender variables
+        self.scared = 0
+        self.last_missing_food = None
+        self.invader_food_counter = [];
+        self.target_food = None
+        self.centered = False;
+
+    def getSuccessor(self, gameState, action):
+        """
+    Finds the next successor which is a grid position (location tuple).
+    """
+        successor = gameState.generateSuccessor(self.index, action)
+        pos = successor.getAgentState(self.index).getPosition()
+        if pos != util.nearestPoint(pos):
+            # Only half a grid position was covered
+            return successor.generateSuccessor(self.index, action)
+        else:
+            return successor
+
+    def chooseAction(self, gameState):
+        """
+    Picks among actions randomly.
+    """
+        actions = gameState.getLegalActions(self.index)
+
+        '''
+    You should change this in your own agent.
+    '''
+
+        return random.choice(actions)
+
+    def closestFood(self, pos, food, ghosts=None):
+        # print [f for f in food.asList() if f[1] < food.height/2]
+        # print [f for f in food.asList() if f[1] > food.height/2]
+        # util.pause()
+        if self.target_food not in food.asList():
+            self.target_food = None
+        if ghosts == None:
+            food_dists = [self.distancer.getDistance(f, pos) for f in food.asList()]
+            return min(food_dists) if len(food_dists) > 0 else 0
+
+        if len(ghosts) < 1 and self.target_food == None:
+            food_dists = [self.distancer.getDistance(f, pos) for f in food.asList()]
+        if len(ghosts) < 1 and self.target_food != None:
+            food_dists = [self.distancer.getDistance(self.target_food, pos)]
+            if self.distancer.getDistance(self.target_food, pos) == 0:
+                self.target_food = None
+        if ghosts and len(ghosts):
+            # print "Ghost Food"
+            food_dists = []
+            for f in food.asList():
+                for g in ghosts:
+                    if self.distancer.getDistance(f, g) > 10:
+                        food_dists += [(self.distancer.getDistance(f, pos), f)]
+            self.target_food = min(food_dists)[1] if len(food_dists) else None
+            return min(food_dists)[0] if len(food_dists) else 100
+
+            # food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() if self.distancer.getDistance(f, g) > 5 for g in ghosts ]
+        # if self.top:
+        #     food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() if f[1] > food.height/2]
+        #     # print "TOP FOOD"
+        # else:
+        #     food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() if f[1] < food.height/2]
+        #     # print "BOT FOOD"
+        return min(food_dists) if len(food_dists) > 0 else 0
+
+    def getPrevPosition(self, playerIndex):
+        if len(self.observationHistory) == 1: return None
+        return self.observationHistory[-2].getAgentPosition(playerIndex)
+
+    def getPrevPositions(self, playerIndex, historyIndex=2):
+        if len(self.observationHistory) == 1: return None
+        if historyIndex < 2: historyIndex = 2
+        return [self.observationHistory[-i].getAgentPosition(playerIndex) for i in xrange(1, historyIndex) if
+                len(self.observationHistory) > i]
+
+
+class Defender(qAgent):
+    def __init__(self, index):
+        qAgent.__init__(self, index)
+
+        # Defender variables
+        self.invader_died = False
+        self.scared = 0
+
+    def getscore(self, gameState):
+        #############
+        # VARAIBLES #
+        #############
+
+        # State Variables
+        current_location = gameState.getAgentPosition(self.index)
+        current_score = gameState.getScore()
+        team_members = list(self.getTeam(gameState))
+        team_food = list(self.getFoodYouAreDefending(gameState))
+        team_food_length = len(self.getFoodYouAreDefending(gameState).asList())
+        team_capsules = 0
+        team_capsules_length = 0
+        team_side = None;
+        game_walls = list(gameState.getWalls())
+        middle = (len(list(game_walls)) / 2, len(list(game_walls[1])) / 2)
+        predicted_distances = list(gameState.getAgentDistances())
+
+        # Previous State Variables
+        previous_state = self.getPreviousObservation()
+        previous_team_food = 0
+        previous_team_food_length = 0
+        previous_capsules = 0
+        previous_capsules_length = 0
+
+        # Enemy Variables
+        enemies = [gameState.getAgentState(i) for i in self.getOpponents(gameState)]
+        invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
+
+        ##################
+        # STAGE 1: SETUP #
+        ##################
+
+        # Checking Side;
+        if (gameState.isOnRedTeam(self.index)):
+            team_side = 1
+        else:
+            team_side = 0
+
+        # Varaibles
+        closest_middle = 99999
+        best_middle = None
+
+        # Loop to find closest middle
+        for y in range(len(game_walls[1])):
+            if (gameState.hasWall(middle[0], y)):
+                continue
+
+            # Calculation
+            difference = abs(middle[1] - y)
+
+            # Comparing
+            if (difference < closest_middle):
+                closest_middle = difference
+                best_middle = (middle[0], y)
+
+        # Reassigning
+        middle = best_middle
+
+        # Checking if next action will change into Pacman;
+        if (gameState.getAgentState(self.index).isPacman):
+            return -99999;
+
+        # Previous state
+        if (previous_state != None):
+
+            # Previous Team Food;
+            previous_team_food = list(self.getFoodYouAreDefending(previous_state))
+            previous_team_food_length = len(self.getFoodYouAreDefending(previous_state).asList())
+
+            # If red;
+            if (team_side == 1):
+                team_capsules = gameState.getRedCapsules();
+                team_capsules_length = len(gameState.getRedCapsules());
+                previous_capsules = list(previous_state.getRedCapsules());
+                previous_capsules_length = len(previous_capsules)
+            else:
+                team_capsules = gameState.getBlueCapsules();
+                team_capsules_length = len(gameState.getBlueCapsules());
+                previous_capsules = list(previous_state.getBlueCapsules());
+                previous_capsules_length = len(previous_capsules)
+
+        # Filtering out predicted distances
+        for member in team_members:
+            # Variables
+            closest_value = None
+            value = None
+
+            # Getting team_member's location
+            member_location = gameState.getAgentPosition(member)
+
+            # Loop
+            for prediction in predicted_distances:
+                # Calculation
+                distance_to_member = self.getMazeDistance(current_location, member_location)
+                difference = abs(distance_to_member - prediction)
+
+            # Comparing
+            if (difference < closest_value) or (closest_value == None):
+                closest_value = difference
+                value = prediction
+
+            # Removing predicted
+            predicted_distances.remove(value)
+
+        ###########################
+        # STAGE 2: PREVIOUS STATE #
+        ###########################
+
+        # Variables
+        previous_location = middle
+
+        # Checking if capsule has been eaten;
+        if (team_capsules_length - previous_capsules_length < 0):
+            self.scared = 40;
+
+        # If difference of food, find difference
+        if (team_food_length - previous_team_food_length < 0) and (previous_state != None):
+
+            # Array for food change
+            food_differences = [];
+
+            # Checking which food has been changed
+            for x in range(len(list(team_food))):
+                for y in range(len(list(team_food[1]))):
+                    if (gameState.hasWall(x, y)):
+                        continue
+                    if (team_food[x][y] == False) and (previous_team_food[x][y] == True):
+                        food_differences.append((x, y))
+
+            # Variables
+            best_distance = 99999
+            best_location = None
+            middle_distance = 999999;
+            middle_distance_location = None;
+
+            # Loop
+            for difference in food_differences:
+                # Finding Closest Food Location
+                for x in range(len(list(team_food))):
+                    for y in range(len(list(team_food[1]))):
+                        if (team_food[x][y] == False):
+                            continue
+                        if (gameState.hasWall(x, y)):
+                            continue
+
+                        # Calculation
+                        distance = self.getMazeDistance(difference, (x, y));
+
+                        # Comparision
+                        if (distance < best_distance):
+                            best_distance = distance
+                            best_location = (x, y)
+
+                # Loop to find the closest halfway points;
+                for y in range(len(game_walls[1])):
+                    if (gameState.hasWall(middle[0], y)):
+                        continue;
+
+                    # Calculation;
+                    distance = self.getMazeDistance(difference, (middle[0], y));
+
+                    # Comparision
+                    if (distance < middle_distance):
+                        middle_distance = distance;
+                        middle_distance_location = (middle[0], y);
+
+            # Getting the min;
+            if (middle_distance < best_distance):
+                self.last_missing_food = middle_distance_location;
+            else:
+                self.last_missing_food = best_location;
+
+        # Return if nothing;
+        if (self.last_missing_food != None) and (len(invaders) == 0):
+            return current_score - self.getMazeDistance(current_location, self.last_missing_food);
+
+        ###################
+        # STAGE 3: PATROL #
+        ###################
+
+        # Checking
+        if (len(list(invaders)) == 0):
+
+            # Variables;
+            closest_foods = [];
+
+            # Loop getting 3 closest foods;
+            while (len(closest_foods) != 3):
+
+                # Variables;
+                predicted_closest_food = None;
+                predicted_closest_food_location = None;
+
+                # Finding 
+                # closest to a food and middle
+                for x in range(len(list(team_food))):
+                    for y in range(len(list(team_food[1]))):
+
+                        # If False
+                        if (team_food[x][y] == False):
+                            continue
+
+                        # If current_location
+                        if ((x, y) == current_location):
+                            continue
+
+                        # If walls;
+                        if (gameState.hasWall(x, y)):
+                            continue
+
+                        # If already added;
+                        if ((x, y) in closest_foods):
+                            continue;
+
+                        # Calculation
+                        distance = self.getMazeDistance((x, y), middle);
+
+                        # Checking
+                        if (distance < predicted_closest_food) or (predicted_closest_food == None):
+                            predicted_closest_food = distance
+                            predicted_closest_food_location = (x, y);
+
+                # If none, Appends
+                if (predicted_closest_food_location == None):
+                    closest_foods.append(middle);
+                else:
+                    closest_foods.append(predicted_closest_food_location);
+
+            # Setting Main Choice;
+            self.last_missing_food = random.choice(closest_foods);
+            return current_score - self.getMazeDistance(current_location, self.last_missing_food);
+
+        ############################
+        # STAGE 4: COUNTER-SCORING #
+        ############################
+
+        # Setups
+        estimations = [];
+
+        # Loop for each known invaders
+        for invader in invaders:
+
+            # Getting locationl
+            invader_location = invader.getPosition();
+
+            # Variables;
+            middle_distance = 999999;
+            middle_distance_location = None;
+
+            # Loop to find the closest halfway points;
+            for y in range(len(game_walls[1])):
+                if (gameState.hasWall(middle[0], y)):
+                    continue;
+
+                # Calculation;
+                distance = self.getMazeDistance(invader_location, (middle[0], y));
+
+                # Comparision
+                if (distance < middle_distance):
+                    middle_distance = distance;
+                    middle_distance_location = (middle[0], y);
+
+            # Calculations for defender;
+            distance_to_invader = self.getMazeDistance(current_location, invader_location);
+            distance_to_middle_invader = self.getMazeDistance(middle_distance_location, invader_location);
+            distance_to_middle_defender = self.getMazeDistance(current_location, middle_distance_location);
+
+            # Checking for ghost timers;
+            if (distance_to_invader <= 2) and (self.scared > 0):
+                distance_to_invader = 99999;
+
+            # Adding to estimations;
+            estimations.append(min(distance_to_invader, distance_to_middle_defender,
+                                   (distance_to_middle_invader + distance_to_invader)));
+
+        return current_score - min(estimations);
+
+    def chooseAction(self, gameState):
+
+        # Values
+        defender = self.index
+        depth_level = 0
+        current_state = gameState
+
+        # Enemy
+        enemies = self.getOpponents(gameState)
+
+        # Array
+        visible_agents = []
+
+        # Loop to filter
+        for agents in enemies:
+            if (gameState.getAgentPosition(agents) != None):
+                visible_agents.append(agents)
+
+        # Smalle check;
+        if (gameState.getAgentPosition(self.index) == self.last_missing_food):
+            self.last_missing_food = None;
+
+        # Checking
+        if (len(visible_agents) >= 0):
+            acts = gameState.getLegalActions(self.index)
+            action_values = []
+
+            b = None
+            a = None
+
+            for act in acts:
+                score = self.getscore(gameState.generateSuccessor(self.index, act))
+                if (score > b) or (b == None):
+                    b = score
+                    a = act
+
+            # Ghost Timer;
+            self.scared -= 1;
+
+            return a
+
+
+class Attacker(qAgent):
+    def __init__(self, index):
+        qAgent.__init__(self, index)
+        self.weights = util.Counter()
+        # Weights learnt from q learning
+        # self.weights['closest-food'] = -54.656283215134316
+        self.weights['bias'] = 166.8428748038756
+        self.weights['#-of-ghosts-1-step-away'] = -2165.245902678644
+        self.weights['dist_to_base'] = 449.7303461064778
+
+
+    def evalScore(self, state, action):
+        # Adapated from assignemnt 3 simple feature extractor (Berkeley) 
+        # https://s3-us-west-2.amazonaws.com/cs188websitecontent/projects/release/reinforcement/v1/001/docs/featureExtractors.html
+
+        myState = state.getAgentState(self.index)
+        walls = state.getWalls()
+        successor = state.generateSuccessor(self.index, action)
+        ghosts_states = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+        ghosts = [ghost.getPosition() for ghost in ghosts_states if ghost.getPosition() is not None]
+
+        features = util.Counter()
+        features["bias"] = 1.0
+
+        # compute the location of pacman after he takes the action
+        x, y = state.getAgentPosition(self.index)
+        pos = successor.getAgentPosition(self.index)
+        dx, dy = Actions.directionToVector(action)
+        next_x, next_y = int(x + dx), int(y + dy)
+
+        if (x, y) in self.start or myState.isPacman != True:
+            self.food_eaten = 0
+        if self.food_eaten > 0 and (x, y) != self.start:
+            features["dist_to_base"] = (1.0 / abs(self.getMazeDistance(pos, self.start) + 1) * 100) + sum(
+                (next_x, next_y) in Actions.getLegalNeighbors(g, walls) for g in ghosts) * -2165.245902678644
+        if self.scared < 1:
+            features["#-of-ghosts-1-step-away"] = sum(
+                (next_x, next_y) in Actions.getLegalNeighbors(g, walls) for g in ghosts)
+
+        return self.weights * features
+
+    # A cost function for astar that eats food and plans to avoid ghosts
+    def foody(self, state, ):
+        # Heuristic for astar
+        x, y = state.getAgentPosition(self.index)
+        self.debugDraw([(x, y)], [1, 0, 0], True)
+        walls = state.getWalls()
+        ghosts_states = [state.getAgentState(i) for i in self.getOpponents(state) if
+                         state.getAgentState(i).isPacman != True]
+        ghosts_p = [a.getPosition() for a in ghosts_states if a.getPosition() != None and a.isPacman != True]
+        ghosts = []
+        ghosts_all_dist = []
+        cost = 0
+        num_of_ghosts_1_step_away = 0
+        food = self.getFood(state)
+        walls = state.getWalls()
+        self.top = False
+        if len(ghosts_p):
+            num_of_ghosts_1_step_away = sum((x, y) in Actions.getLegalNeighbors(g, walls) for g in ghosts_p)
+            cost += num_of_ghosts_1_step_away * 1000
+        else:
+            est_dist = state.getAgentDistances()
+            pacman_d = 0
+            for i in self.getOpponents(state):
+                pacman_d += est_dist[i]
+            cost += 1.0 / pacman_d * 100 if pacman_d > 0 else 0
+
+        for i in ghosts_p:
+            dist = self.getMazeDistance((x, y), i)
+            if dist < random.randint(1, 3):
+                ghosts += [dist]
+            ghosts_all_dist += [dist]
+
+        if len(state.getLegalActions(self.index)) < 3 and len(ghosts_p) > 0:
+            if min(ghosts_all_dist) < 5:
+                cost += 1.0 / len(state.getLegalActions(self.index)) * 10000 * min(ghosts_all_dist)
+
+        if len(ghosts):
+            self.last_known_ghosts = ghosts_p
+            cost += (1.0 / min(ghosts)) * 100
+
+        # increase cost if food is far
+        cost += self.closestFood((x, y), food, ghosts_p) if len(food.asList()) > 0 else 0
+
+        # more food is bad
+        cost += len(food.asList()) * 10
+        # print cost
+        return cost
+
+    def a_star(self, state):
+        queue = util.PriorityQueue()
+        # Create visited nodes or 'closed' set
+        visited = []
+        visited_draw = []
+        prev_food = self.getFood(state)
+        possible_paths = []
+        # Push starting node to queue
+        queue.push((state, [], self.foody(state)),
+                   self.foody(state)
+                   )
+        best_path_so_far = []
+        last_h = float('inf')
+        i = 0
+        while not queue.isEmpty():
+
+            # Pop node coordinates and current path
+            node, actions, p_cost = queue.pop()
+            if p_cost < last_h:
+                best_path_so_far += [actions]
+            food = self.getFood(node)
+            x, y = node.getAgentPosition(self.index)
+
+            # # Check if node has been visited (required)
+            if (x, y) in visited_draw:
+                i -= 1
+                continue
+            visited_draw += [(x, y)]
+
+            # Add node to visited
+            visited.append(node)
+            self.debugDraw(visited_draw, [0.7, 0, 0], True)
+            # add all paths that contain food into list of possible paths
+            if (x, y) in prev_food.asList():
+                possible_paths += [(p_cost, actions)]
+            # limit to range 10
+            if i > 10:
+                if len(possible_paths):
+                    return min(possible_paths)[1][0]
+                elif len(best_path_so_far):
+                    return best_path_so_far[len(best_path_so_far) - 1][0]
+
+            c = len(actions)
+            prev_food = food
+            # Handle node successors
+            legal_acts = node.getLegalActions(self.index)
+            for act in legal_acts:
+                s_state = node.generateSuccessor(self.index, act)
+                myPos = s_state.getAgentPosition(self.index)
+                if myPos not in visited_draw:
+                    queue.push((s_state, actions + [act], self.foody(s_state)),
+                               c + self.foody(s_state)
+                               )
+            i += 1
+
+        # Return empty list if goal not found
+        return None
+
+    def chooseAction(self, gameState):
+        prevState = self.getPreviousObservation()
+        if prevState is not None:
+            self.food_eaten += len(self.getFood(prevState).asList()) - len(self.getFood(gameState).asList())
+
+        # random return
+        if random.randint(0, 50) == 25 and self.food_eaten > 1:
+            self.food_eaten = 5
+
+        # Use A-Star search to find more food.
+        if self.food_eaten < 5 or len(self.getFood(gameState).asList()) == 0:
+            return self.a_star(gameState)
+
+        # Return to base
+        actions = gameState.getLegalActions(self.index)
+        action_values = [(self.evalScore(gameState, action), action) for action in actions]
+
+        # Return best action based on score from a list of legal actions
+        return max(action_values)[1] if len(action_values) > 0 else None
+# myTeam.py
+# ---------
+# Licensing Information:  You are free to use or extend these projects for
+# educational purposes provided that (1) you do not distribute or publish
+# solutions, (2) you retain this notice, and (3) you provide clear
+# attribution to UC Berkeley, including a link to http://ai.berkeley.edu.
+# 
+# Attribution Information: The Pacman AI projects were developed at UC Berkeley.
+# The core projects and autograders were primarily created by John DeNero
+# (denero@cs.berkeley.edu) and Dan Klein (klein@cs.berkeley.edu).
+# Student side autograding was added by Brad Miller, Nick Hay, and
+# Pieter Abbeel (pabbeel@cs.berkeley.edu).
+
+
+from captureAgents import CaptureAgent
+import random, time, util
+from game import Directions
+import game
+from game import Actions
+import random
+
+
+#################
+# Team creation #
+#################
+
+def createTeam(firstIndex, secondIndex, isRed,
+               first='Attacker', second='Defender'):
+    """
+  This function should return a list of two agents that will form the
+  team, initialized using firstIndex and secondIndex as their agent
+  index numbers.  isRed is True if the red team is being created, and
+  will be False if the blue team is being created.
+  As a potentially helpful development aid, this function can take
+  additional string-valued keyword arguments ("first" and "second" are
+  such arguments in the case of this function), which will come from
+  the --redOpts and --blueOpts command-line arguments to capture.py.
+  For the nightly contest, however, your team will be created without
+  any extra arguments, so you should make sure that the default
+  behavior is what you want for the nightly contest.
+  """
+
+    # The following line is an example only feel free to change it.
+    return [eval(first)(firstIndex), eval(second)(secondIndex)]
+
+
+##########
+# Agents #
+##########
+
+class qAgent(CaptureAgent):
+    """
+  A Dummy agent to serve as an example of the necessary agent structure.
+  You should look at baselineTeam.py for more details about how to
+  create an agent as this is the bare minimum.
+  """
+
+    def registerInitialState(self, gameState):
+        """
+    This method handles the initial setup of the
+    agent to populate useful fields (such as what team
+    we're on).
+    A distanceCalculator instance caches the maze distances
+    between each pair of positions, so your agents can use:
+    self.distancer.getDistance(p1, p2)
+    IMPORTANT: This method may run for at most 15 seconds.
+    """
+
+        '''
+    Make sure you do not delete the following line. If you would like to
+    use Manhattan distances instead of maze distances in order to save
+    on initialization time, please take a look at
+    CaptureAgent.registerInitialState in captureAgents.py.
+    '''
+        CaptureAgent.registerInitialState(self, gameState)
+
+        '''
+    Your initialization code goes here, if you need any.
+    '''
+        self.start = gameState.getAgentPosition(self.index)
+        self.depth = 1
+
+        self.food_eaten = 0
+        self.last_missing_food = None
+        self.last_known_ghosts = []
+        self.top = False
+
+        # Defender variables
+        self.invader_died = False
+        self.scared = 0
+        self.target_food = None
+        
+    def getSuccessor(self, gameState, action):
+        """
+    Finds the next successor which is a grid position (location tuple).
+    """
+        successor = gameState.generateSuccessor(self.index, action)
+        pos = successor.getAgentState(self.index).getPosition()
+        if pos != util.nearestPoint(pos):
+            # Only half a grid position was covered
+            return successor.generateSuccessor(self.index, action)
+        else:
+            return successor
+
+    def chooseAction(self, gameState):
+        """
+    Picks among actions randomly.
+    """
+        actions = gameState.getLegalActions(self.index)
+
+        '''
+    You should change this in your own agent.
+    '''
+
+        return random.choice(actions)
+
+   
+    def closestFood(self, pos, food,ghosts=None):
+        # print [f for f in food.asList() if f[1] < food.height/2]
+        # print [f for f in food.asList() if f[1] > food.height/2]
+        # util.pause()
+        if self.target_food not in food.asList():
+            self.target_food = None
+        if ghosts == None:
+            food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() ]
+            return min(food_dists) if len(food_dists) > 0 else 0
+
+        if len(ghosts) < 1 and self.target_food == None:
+            food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() ]
+        if len(ghosts) < 1 and self.target_food != None:
+            food_dists = [self.distancer.getDistance(self.target_food, pos)]
+            if self.distancer.getDistance(self.target_food, pos) == 0 :
+                self.target_food = None
+        if ghosts and len(ghosts):
+            # print "Ghost Food"
+            food_dists = []
+            for f in food.asList():
+                for g in ghosts:
+                    if self.distancer.getDistance(f, g) > 10:
+                        food_dists += [(self.distancer.getDistance(f, pos),f)]
+            self.target_food = min(food_dists)[1] if len(food_dists) else None
+            return min(food_dists)[0] if len(food_dists) else 100
+
+            # food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() if self.distancer.getDistance(f, g) > 5 for g in ghosts ]
+        # if self.top:
+        #     food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() if f[1] > food.height/2]
+        #     # print "TOP FOOD"
+        # else:
+        #     food_dists = [self.distancer.getDistance(f, pos) for f in food.asList() if f[1] < food.height/2]
+        #     # print "BOT FOOD"
+        return min(food_dists) if len(food_dists) > 0 else 0
+
+
+
+class Defender(qAgent):
+    def getscore(self, gameState):
+        #############
+        # VARAIBLES #
+        #############
+
+        # State Variables
+        current_location = gameState.getAgentPosition(self.index)
+        current_score = gameState.getScore()
+        team_members = list(self.getTeam(gameState))
+        team_food = list(self.getFoodYouAreDefending(gameState))
+        team_food_length = len(self.getFoodYouAreDefending(gameState).asList())
+        team_capsules = 0
+        team_capsules_length = 0
+        team_side = None;
+        game_walls = list(gameState.getWalls())
+        middle = (len(list(game_walls)) / 2, len(list(game_walls[1])) / 2)
+        predicted_distances = list(gameState.getAgentDistances())
+
+        # Previous State Variables
+        previous_state = self.getPreviousObservation()
+        previous_team_food = 0
+        previous_team_food_length = 0
+        previous_capsules = 0
+        previous_capsules_length = 0
+
+        # Enemy Variables
+        enemies = [gameState.getAgentState(i) for i in self.getOpponents(gameState)]
+        invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
+
+
+        ##################
+        # STAGE 1: SETUP #
+        ##################
+
+        # Checking Side;
+        if (gameState.isOnRedTeam(self.index)):
+            team_side = 1
+        else:
+            team_side = 0
+
+        # Varaibles
+        closest_middle = 99999
+        best_middle = None
+
+        # Loop to find closest middle
+        for y in range (len(game_walls[1])):
+            if (gameState.hasWall(middle[0], y)):
+                continue
+
+            # Calculation
+            difference = abs(middle[1] - y)
+
+            # Comparing
+            if (difference < closest_middle):
+                closest_middle = difference
+                best_middle = (middle[0], y)
+
+        # Reassigning
+        middle = best_middle
+
+        # Checking if next action will change into Pacman;
+        if (gameState.getAgentState(self.index).isPacman):
+            return -99999;
+
+        # Previous state
+        if (previous_state != None):
+
+            # Previous Team Food;
+            previous_team_food = list(self.getFoodYouAreDefending(previous_state))
+            previous_team_food_length = len(self.getFoodYouAreDefending(previous_state).asList())
+
+            # If red;
+            if(team_side == 1):
+                team_capsules = gameState.getRedCapsules();
+                team_capsules_length = len(gameState.getRedCapsules());
+                previous_capsules = list(previous_state.getRedCapsules());
+                previous_capsules_length = len(previous_capsules)
+            else:
+                team_capsules = gameState.getBlueCapsules();
+                team_capsules_length = len(gameState.getBlueCapsules());
+                previous_capsules = list(previous_state.getBlueCapsules());
+                previous_capsules_length = len(previous_capsules)
+
+        # Filtering out predicted distances
+        for member in team_members:
+            # Variables
+            closest_value = None
+            value = None
+
+            # Getting team_member's location
+            member_location = gameState.getAgentPosition(member)
+
+            # Loop
+            for prediction in predicted_distances:
+                # Calculation
+                distance_to_member = self.getMazeDistance(current_location, member_location)
+                difference = abs(distance_to_member - prediction)
+
+            # Comparing
+            if (difference < closest_value) or (closest_value == None):
+                closest_value = difference
+                value = prediction
+
+            # Removing predicted
+            predicted_distances.remove(value)
+
+        ###########################
+        # STAGE 2: PREVIOUS STATE #
+        ###########################
+
+        # Variables
+        previous_location = middle
+
+        # Checking if capsule has been eaten;
+        if (team_capsules_length - previous_capsules_length < 0):
+            self.scared = 40;
+
+        # If difference of food, find difference
+        if (team_food_length - previous_team_food_length < 0) and (previous_state != None):
+
+            # Array for food change
+            food_differences = [];
+
+            # Checking which food has been changed
+            for x in range(len(list(team_food))):
+                for y in range(len(list(team_food[1]))):
+                    if (gameState.hasWall(x, y)):
+                        continue
+                    if (team_food[x][y] == False) and (previous_team_food[x][y] == True):
+                        food_differences.append((x, y))
+
+            # Variables
+            best_distance = 99999
+            best_location = None
+            middle_distance = 999999;
+            middle_distance_location = None;
+
+            # Loop
+            for difference in food_differences:
+                # Finding Closest Food Location
+                for x in range(len(list(team_food))):
+                    for y in range(len(list(team_food[1]))):
+                        if (team_food[x][y] == False):
+                            continue
+                        if (gameState.hasWall(x, y)):
+                            continue
+
+                        # Calculation
+                        distance = self.getMazeDistance(difference, (x, y));
+
+                        # Comparision
+                        if (distance < best_distance):
+                            best_distance = distance
+                            best_location = (x, y)
+
+
+                # Loop to find the closest halfway points;
+                for y in range (len(game_walls[1])):
+                    if (gameState.hasWall(middle[0], y)):
+                        continue;
+
+                    # Calculation;
+                    distance = self.getMazeDistance(difference, (middle[0], y));
+
+                    # Comparision
+                    if (distance < middle_distance):
+                        middle_distance = distance;
+                        middle_distance_location = (middle[0], y);
+
+            # Getting the min;
+            if (middle_distance < best_distance):
+                self.last_missing_food = middle_distance_location;
+            else:
+                self.last_missing_food = best_location;
+
+        # Return if nothing;
+        if (self.last_missing_food != None) and (len(invaders) == 0):
+            return current_score - self.getMazeDistance(current_location, self.last_missing_food);
+
+
+        ########################
+        # STAGE 3: PREDICTIONS #
+        ########################
+
+        # Checking
+        if (len(list(invaders)) == 0):
+
+            # Array for predicted locations
+            predicted_enemy_locations = []
+
+            # Looping through map
+            for prediction in predicted_distances:
+                # Loop
+                for x in range(len(list(game_walls))):
+                    for y in range(len(list(game_walls[1]))):
+
+                        # If wall
+                        if (gameState.hasWall(x, y)):
+                            continue
+
+                        if ((x, y) == current_location):
+                            continue
+
+                        # Calculation
+                        distance = self.getMazeDistance(current_location, (x, y))
+
+                        # Checking
+                        if (distance == prediction):
+                            predicted_enemy_locations.append((x, y))
+
+            # Variable
+            predicted_closest_food = 99999
+            predicted_closest_food_location = None
+
+            # Finding predicted location
+            # closest to a food and middle
+            for location in predicted_enemy_locations:
+                # Loop
+                for x in range(len(list(team_food))):
+                    for y in range(len(list(team_food[1]))):
+
+                        # If False
+                        if (team_food[x][y] == False):
+                            continue
+
+                            # If current_location
+                        if ((x, y) == current_location):
+                            continue
+
+                        if (gameState.hasWall(x, y)):
+                            continue
+
+                        # Calculation
+                        food_distance = self.getMazeDistance(location, (x, y))
+                        middle_distance = self.getMazeDistance(middle, (x, y))
+                        calculation = food_distance + middle_distance
+
+                        # Checking
+                        if (calculation < predicted_closest_food) or (predicted_closest_food == None):
+                            predicted_closest_food = calculation
+                            predicted_closest_food_location = (x, y)
+
+            # If none, return Score
+            if (predicted_closest_food_location == None):
+                return current_score
+
+            # Loop for random patrol
+            return current_score - self.getMazeDistance(current_location, predicted_closest_food_location)
+
+        ############################
+        # STAGE 4: COUNTER-SCORING #
+        ############################
+
+        # Setups
+        estimations = [];
+
+        # Loop for each known invaders
+        for invader in invaders:
+
+            # Getting locationl
+            invader_location = invader.getPosition();
+
+            # Calculations for defender;
+            distance_to_invader = self.getMazeDistance(current_location, invader_location);
+
+            # Checking for ghost timers;
+            if (distance_to_invader <= 2) and (self.scared > 0):
+                distance_to_invader = 99999;
+
+            # Adding to estimations;
+            estimations.append(distance_to_invader);
+
+        return current_score - min(estimations)
+
+
+    def chooseAction(self, gameState):
+
+        # Values
+        defender = self.index
+        depth_level = 0
+        current_state = gameState
+
+        # Enemy
+        enemies = self.getOpponents(gameState)
+
+        # Array
+        visible_agents = []
+
+        # Loop to filter
+        for agents in enemies:
+            if (gameState.getAgentPosition(agents) != None):
+                visible_agents.append(agents)
+
+        # Smalle check;
+        if (gameState.getAgentPosition(self.index) == self.last_missing_food):
+            self.last_missing_food = None;
+
+        # Checking
+        if (len(visible_agents) >= 0):
+            acts = gameState.getLegalActions(self.index)
+            action_values = []
+
+            b = None
+            a = None
+
+            for act in acts:
+                score = self.getscore(gameState.generateSuccessor(self.index, act))
+                if (score > b) or (b == None):
+                    b = score
+                    a = act
+
+            # Ghost Timer;
+            self.scared -= 1;
+
+            return a
+
+
+class Attacker(qAgent):
+    
+    def getscore(self, state, action):
+
+        # Adapated from assignemnt 3 simple feature extractor (Berkeley) 
+        # https://s3-us-west-2.amazonaws.com/cs188websitecontent/projects/release/reinforcement/v1/001/docs/featureExtractors.html
+
+        myState = state.getAgentState(self.index)
+        food = self.getFood(state)
+        walls = state.getWalls()
+        successor = state.generateSuccessor(self.index, action)
+        ghosts_states = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+        # ghosts = [a.getPosition() for a in ghosts]
+        ghosts = []
+        for i in ghosts_states:
+            if i.getPosition() != None:
+                ghosts += [i.getPosition()]
+
+        features = util.Counter()
+
+        features["bias"] = 1.0
+
+        # compute the location of pacman after he takes the action
+        x, y = state.getAgentPosition(self.index)
+        pos = successor.getAgentPosition(self.index)
+        dx, dy = Actions.directionToVector(action)
+        next_x, next_y = int(x + dx), int(y + dy)
+        # Go home
+        # print  (x,y) in self.start or myState.isPacman != True
+        if (x, y) in self.start or myState.isPacman != True:
+            # print "MADE IT 0"
+            self.food_eaten = 0
+        if self.food_eaten > 0 and (x, y) != self.start:
+            # print "RETURN TO BASE"
+            # print self.getMazeDistance(pos, self.start)
+            return (1.0 / abs(self.getMazeDistance(pos, self.start) + 1) * 100) + sum(
+                (next_x, next_y) in Actions.getLegalNeighbors(g, walls) for g in ghosts) * -2165.245902678644
+
+        # count the number onf ghosts 1-step away
+        # print ghosts
+
+        features["#-of-ghosts-1-step-away"] = sum(
+            (next_x, next_y) in Actions.getLegalNeighbors(g, walls) for g in ghosts)
+
+        # if there is no danger of ghosts then add the food feature
+        if not features["#-of-ghosts-1-step-away"] and food[next_x][next_y]:
+            self.food_eaten += 1
+            features["eats-food"] = 1.0
+
+        dist = self.closestFood((next_x, next_y), food) if len(food.asList()) > 0 else 0
+
+        if dist is not None:
+            features["closest-food"] = float(dist) / (walls.width * walls.height)
+
+        weights = util.Counter()
+        # Weights learnt from q learning
+        weights['closest-food'] = -54.656283215134316
+        weights['bias'] = 166.8428748038756
+        weights['#-of-ghosts-1-step-away'] = -2165.245902678644
+        weights['eats-food'] = 449.7303461064778
+
+        return weights * features
+
+    # A cost function for astar that eats food and plans to avoid ghosts
+    def foody(self, state, ):
+        # Hueristic for astar 
+        import time
+        x, y = state.getAgentPosition(self.index)
+        self.debugDraw([(x,y)], [1, 0, 0], True)
+        walls = state.getWalls()
+        ghosts_states = [state.getAgentState(i) for i in self.getOpponents(state)]
+        ghosts_p = [a.getPosition() for a in ghosts_states if a.getPosition() != None]
+        ghosts = []
+        cost = 0
+        num_of_ghosts_1_step_away = 0
+        food = self.getFood(state)
+        walls = state.getWalls()
+        self.top = False
+        if len(ghosts_p):
+            num_of_ghosts_1_step_away = sum((x, y) in Actions.getLegalNeighbors(g, walls) for g in ghosts_p)
+            cost += num_of_ghosts_1_step_away * 1000
+        else:
+            est_dist = state.getAgentDistances()
+            pacman_d = 0
+            for i in self.getOpponents(state):
+                pacman_d += est_dist[i]
+            cost += 1.0 / (pacman_d + 1) * 100
+
+        if len(state.getLegalActions(self.index)) < 3 and num_of_ghosts_1_step_away > 0:
+            cost += 1.0 / pow(2, len(state.getLegalActions(self.index))) * 10000
+
+        for i in ghosts_states:
+            if i.getPosition() != None:
+                dist = self.getMazeDistance((x,y),i.getPosition())
+                if dist < random.randint(1,3):
+                    ghosts += [dist]
+
+        if len(ghosts):
+            self.last_known_ghosts = ghosts_p
+            cost += (1.0 / min(ghosts)) *100
+
+
+
+        # increase cost if food is far
+        cost += self.closestFood((x, y),food,ghosts_p) if len(food.asList()) > 0 else 0
+
+        # more food is bad
+        cost += len(food.asList()) * 10
+
+        return cost
+
+    def a_star(self, state, heuristic=foody):
+        import time
+        queue = util.PriorityQueue()
+
+        # Create visited nodes or 'closed' set
+        visited = []
+        visited_draw = []
+        prev_food = self.getFood(state)
+        possible_paths = []
+        # Push starting node to queue
+        queue.push((state, [], self.foody(state)),
+                   self.foody(state)
+                   )
+        best_path_so_far = []
+        last_h = float('inf')
+        i = 0
+        while not queue.isEmpty():
+
+            # print i
+
+            # Pop node coordinates and current path
+            node, actions, p_cost = queue.pop()
+            if p_cost < last_h:
+                best_path_so_far += [actions]
+            food = self.getFood(node)
+            x, y = node.getAgentPosition(self.index)
+
+            # # Check if node has been visited (required)
+            if (x, y) in visited_draw:
+                i -= 1
+                continue
+            visited_draw += [(x, y)]
+
+            # Add node to visited
+            visited.append(node)
+            self.debugDraw(visited_draw, [0.7, 0, 0], True)
+            if (x, y) in prev_food.asList():
+                possible_paths += [actions]
+            if i > 10:
+
+                if len(possible_paths):
+                    return possible_paths[0][0]
+                elif len(best_path_so_far):
+                    return best_path_so_far[len(best_path_so_far)-1][0]
+
+            c = len(actions)
+            prev_food = food
+            # Handle node successors
+            legal_acts = node.getLegalActions(self.index)
+            for act in legal_acts:
+                s_state = node.generateSuccessor(self.index, act)
+                myPos = s_state.getAgentPosition(self.index)
+                if myPos not in visited_draw:
+                    queue.push((s_state, actions + [act], self.foody(s_state)),
+                               c+self.foody(s_state)
+                               )
+            i += 1
+
+        # Return empty list if goal not found
+        return None
+
+    def chooseAction(self, gameState):
+        # do expectimax
+        import random
+        # print gameState.getAgentPosition(self.index)
+        ghosts_states = [gameState.getAgentState(i).getPosition() for i in self.getOpponents(gameState) if
+                         gameState.getAgentState(i).getPosition() != None]
+        prev_state = self.getPreviousObservation()
+        if prev_state != None:
+            self.food_eaten += len(self.getFood(prev_state).asList()) - len(self.getFood(gameState).asList())
+        # print self.food_eaten
+        if self.food_eaten < 5 or len(self.getFood(gameState).asList()) == 0 :
+            return self.a_star(gameState)
+        acts = gameState.getLegalActions(self.index)
+        action_values = []
+        for act in acts:
+            action_values += [(self.getscore(gameState, act), act)]
+        if len(action_values):
+            return max(action_values)[1]
+        else:
+            return None
